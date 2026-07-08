@@ -1,8 +1,8 @@
-"""Run a small robosuite Panda Lift demo.
+"""Run and inspect simple robosuite Panda Lift policies.
 
-This script is intentionally simple: it is a smoke test for the environment and
-an entry point for learning how actions, observations, rewards, and rendering
-fit together in robosuite.
+The script is intentionally lightweight, but it is structured for debugging:
+policies are selectable, per-step diagnostics can be logged, and the staged pick
+policy exposes its internal phase.
 """
 
 import argparse
@@ -52,6 +52,12 @@ def parse_args():
         default="smoke",
         help="Scripted policy to run: smoke checks the environment; approach moves above the cube; pick approaches, descends, grasps, and lifts.",
     )
+    parser.add_argument(
+        "--success-cube-z",
+        type=float,
+        default=0.90,
+        help="Cube height threshold used for the final success summary.",
+    )
     return parser.parse_args()
 
 
@@ -74,87 +80,11 @@ def zero_action(action_dim):
     return np.zeros(action_dim)
 
 
-def smoke_policy(action_dim, step, obs):
-    """Return the original simple hand-written smoke-test action."""
-    action = zero_action(action_dim)
-
-    if step > 100:
-        action[-1] = GRIPPER_CLOSE
-
-    if 200 < step < 300:
-        action[0] = 0.2
-
-    return action
-
-
-def relative_cube_offset(obs):
-    offset = obs.get("gripper_to_cube_pos")
-    if offset is None or len(offset) < 3:
-        return None
-
-    import numpy as np
-
-    return np.asarray(offset, dtype=float)
-
-
-def move_to_relative_offset(action_dim, offset, desired_cube_below_gripper):
-    import numpy as np
-
-    action = zero_action(action_dim)
-    error = offset - np.asarray(desired_cube_below_gripper, dtype=float)
-    action[:3] = np.clip(error * 2.0, -0.25, 0.25)
-    return action
-
-
-def approach_policy(action_dim, step, obs):
-    """Move the end effector to a hover pose above the cube."""
-    offset = relative_cube_offset(obs)
-    if offset is None:
-        return smoke_policy(action_dim, step, obs)
-
-    action = move_to_relative_offset(action_dim, offset, desired_cube_below_gripper=[0.0, 0.0, -0.05])
-    action[-1] = GRIPPER_OPEN
-    return action
-
-
-def pick_policy(action_dim, step, obs):
-    """Simple staged pick attempt: hover, descend, close gripper, then lift."""
-    import numpy as np
-
-    offset = relative_cube_offset(obs)
-    if offset is None:
-        return smoke_policy(action_dim, step, obs)
-
-    xy_error = np.linalg.norm(offset[:2])
-    z_gap = offset[2]
-
-    if xy_error > 0.025 or z_gap < -0.065:
-        action = move_to_relative_offset(action_dim, offset, desired_cube_below_gripper=[0.0, 0.0, -0.05])
-        action[-1] = GRIPPER_OPEN
-        return action
-
-    if step < 150:
-        action = move_to_relative_offset(action_dim, offset, desired_cube_below_gripper=[0.0, 0.0, 0.0])
-        action[-1] = GRIPPER_OPEN
-        return action
-
-    if step < 220:
-        action = zero_action(action_dim)
-        action[-1] = GRIPPER_CLOSE
-        return action
-
-    action = zero_action(action_dim)
-    action[2] = 0.25
-    action[-1] = GRIPPER_CLOSE
-    return action
-
-
-def scripted_action(action_dim, step, obs, policy):
-    if policy == "approach":
-        return approach_policy(action_dim, step, obs)
-    if policy == "pick":
-        return pick_policy(action_dim, step, obs)
-    return smoke_policy(action_dim, step, obs)
+def vector_components(obs, key):
+    value = obs.get(key)
+    if value is None or len(value) < 3:
+        return None, None, None
+    return float(value[0]), float(value[1]), float(value[2])
 
 
 def obs_metrics(obs):
@@ -173,8 +103,120 @@ def obs_metrics(obs):
     return distance, xy_distance, dz
 
 
-def print_step_summary(step, obs, reward):
+def relative_cube_offset(obs):
+    offset = obs.get("gripper_to_cube_pos")
+    if offset is None or len(offset) < 3:
+        return None
+
+    import numpy as np
+
+    return np.asarray(offset, dtype=float)
+
+
+def move_to_relative_offset(action_dim, offset, desired_cube_below_gripper, gain=2.2, limit=0.25):
+    import numpy as np
+
+    action = zero_action(action_dim)
+    error = offset - np.asarray(desired_cube_below_gripper, dtype=float)
+    action[:3] = np.clip(error * gain, -limit, limit)
+    return action
+
+
+class SmokePolicy:
+    phase = "smoke"
+
+    def act(self, action_dim, step, obs):
+        action = zero_action(action_dim)
+
+        if step > 100:
+            action[-1] = GRIPPER_CLOSE
+
+        if 200 < step < 300:
+            action[0] = 0.2
+
+        return action
+
+
+class ApproachPolicy:
+    phase = "approach"
+
+    def act(self, action_dim, step, obs):
+        offset = relative_cube_offset(obs)
+        if offset is None:
+            return SmokePolicy().act(action_dim, step, obs)
+
+        action = move_to_relative_offset(action_dim, offset, desired_cube_below_gripper=[0.0, 0.0, -0.05])
+        action[-1] = GRIPPER_OPEN
+        return action
+
+
+class PickPolicy:
+    """Observation-driven staged pick policy.
+
+    This is still a scripted baseline, not a general manipulation planner. The
+    important part is that phase transitions are based on measured pose error
+    and gripper timing instead of fixed global step numbers.
+    """
+
+    def __init__(self):
+        self.phase = "hover"
+        self.phase_steps = 0
+
+    def set_phase(self, phase):
+        if self.phase != phase:
+            self.phase = phase
+            self.phase_steps = 0
+
+    def act(self, action_dim, step, obs):
+        import numpy as np
+
+        offset = relative_cube_offset(obs)
+        if offset is None:
+            return SmokePolicy().act(action_dim, step, obs)
+
+        xy_error = float(np.linalg.norm(offset[:2]))
+        z_gap = float(offset[2])
+
+        if self.phase == "hover":
+            if xy_error < 0.018 and -0.060 <= z_gap <= -0.035:
+                self.set_phase("descend")
+            action = move_to_relative_offset(action_dim, offset, desired_cube_below_gripper=[0.0, 0.0, -0.05])
+            action[-1] = GRIPPER_OPEN
+
+        elif self.phase == "descend":
+            if xy_error < 0.018 and abs(z_gap) < 0.014:
+                self.set_phase("grasp")
+            action = move_to_relative_offset(action_dim, offset, desired_cube_below_gripper=[0.0, 0.0, 0.0], gain=2.0)
+            action[-1] = GRIPPER_OPEN
+
+        elif self.phase == "grasp":
+            if self.phase_steps >= 55:
+                self.set_phase("lift")
+            action = zero_action(action_dim)
+            action[-1] = GRIPPER_CLOSE
+
+        else:
+            action = zero_action(action_dim)
+            action[2] = 0.25
+            action[-1] = GRIPPER_CLOSE
+
+        self.phase_steps += 1
+        return action
+
+
+def make_policy(name):
+    if name == "approach":
+        return ApproachPolicy()
+    if name == "pick":
+        return PickPolicy()
+    return SmokePolicy()
+
+
+def print_step_summary(step, obs, reward, policy):
     print(f"\nStep {step}")
+
+    if hasattr(policy, "phase"):
+        print("Policy phase:", policy.phase)
 
     if "robot0_eef_pos" in obs:
         print("EEF position:", obs["robot0_eef_pos"])
@@ -201,6 +243,7 @@ def make_log_writer(log_file):
         handle,
         fieldnames=[
             "step",
+            "phase",
             "reward",
             "done",
             "eef_x",
@@ -218,14 +261,7 @@ def make_log_writer(log_file):
     return handle, writer
 
 
-def vector_components(obs, key):
-    value = obs.get(key)
-    if value is None or len(value) < 3:
-        return None, None, None
-    return float(value[0]), float(value[1]), float(value[2])
-
-
-def write_step_log(writer, step, obs, reward, done):
+def write_step_log(writer, step, obs, reward, done, policy):
     if writer is None:
         return
 
@@ -235,6 +271,7 @@ def write_step_log(writer, step, obs, reward, done):
     writer.writerow(
         {
             "step": step,
+            "phase": getattr(policy, "phase", ""),
             "reward": float(reward),
             "done": bool(done),
             "eef_x": eef_x,
@@ -250,10 +287,30 @@ def write_step_log(writer, step, obs, reward, done):
     )
 
 
+def update_summary(summary, obs, reward):
+    cube_z = vector_components(obs, "cube_pos")[2]
+    if cube_z is not None:
+        summary["max_cube_z"] = max(summary["max_cube_z"], cube_z)
+    summary["max_reward"] = max(summary["max_reward"], float(reward))
+
+
+def print_final_summary(summary, success_cube_z):
+    success = summary["max_reward"] >= 1.0 or summary["max_cube_z"] >= success_cube_z
+    print("\n==============================")
+    print("Run summary")
+    print("Max reward:", round(summary["max_reward"], 4))
+    print("Max cube_z:", round(summary["max_cube_z"], 4))
+    print("Success threshold cube_z:", success_cube_z)
+    print("Success:", success)
+    print("==============================")
+
+
 def main():
     args = parse_args()
     env = make_env(has_renderer=not args.no_render)
+    policy = make_policy(args.policy)
     log_handle, log_writer = make_log_writer(args.log_file)
+    summary = {"max_reward": 0.0, "max_cube_z": float("-inf")}
 
     try:
         obs = env.reset()
@@ -271,25 +328,29 @@ def main():
             print("-", key)
 
         for step in range(args.steps):
-            action = scripted_action(env.action_dim, step, obs, args.policy)
+            action = policy.act(env.action_dim, step, obs)
             obs, reward, done, info = env.step(action)
+            update_summary(summary, obs, reward)
 
             if not args.no_render:
                 env.render()
 
             if args.print_every > 0 and step % args.print_every == 0:
-                print_step_summary(step, obs, reward)
+                print_step_summary(step, obs, reward, policy)
 
-            write_step_log(log_writer, step, obs, reward, done)
+            write_step_log(log_writer, step, obs, reward, done, policy)
 
             if done:
                 print(f"\nEnvironment returned done at step {step}.")
                 if not args.reset_on_done:
                     break
                 obs = env.reset()
+                policy = make_policy(args.policy)
 
             if not args.no_render and args.sleep > 0:
                 time.sleep(args.sleep)
+
+        print_final_summary(summary, args.success_cube_z)
     finally:
         if log_handle is not None:
             log_handle.close()

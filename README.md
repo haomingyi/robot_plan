@@ -8,7 +8,9 @@ the `Lift` task.
 ## Current Files
 
 - `panda_pick.py`: creates a robosuite `Lift` environment with a Panda robot,
-  prints observation keys, then runs a simple action loop.
+  then runs selectable scripted policies with diagnostics and optional CSV logs.
+- `scripts/evaluate_policy.py`: runs repeated headless policy checks and writes a
+  summary CSV with success rate, max reward, and max cube height.
 
 ## Environment Status
 
@@ -52,7 +54,15 @@ To run and verify a staged pick attempt without relying on the MuJoCo viewer:
 python panda_pick.py --no-render --steps 400 --print-every 50 --policy pick --log-file logs/panda_pick.csv
 ```
 
-A successful pick should show reward increasing to `1.0` and `cube_z` increasing in the CSV log.
+A successful pick should show reward increasing to `1.0`, `cube_z` increasing in the CSV log, and a final `Success: True` summary. The policy phase should progress through `hover`, `descend`, `grasp`, and `lift`.
+
+To run repeated headless evaluations:
+
+```bash
+python scripts/evaluate_policy.py --runs 5 --steps 400 --policy pick
+```
+
+This writes per-run logs under `logs/eval_pick/` and a summary CSV at `logs/eval_pick_summary.csv`.
 
 ## Learning Roadmap
 
@@ -84,5 +94,7 @@ A successful pick should show reward increasing to `1.0` and `cube_z` increasing
 8. Can save per-step reward, done flag, end-effector position, and cube position to CSV.
 9. Includes three scripted policies: `smoke` for environment checks, `approach` for moving above the cube, and `pick` for a staged lift attempt.
 10. Prints and logs distance diagnostics so policy behavior can be checked without relying on the MuJoCo viewer.
+11. Reports run-level success using max reward and max cube height.
+12. Supports repeated headless evaluation for basic success-rate tracking.
 
-This is useful as a smoke test, but it is not yet a real pick-and-place policy.
+This is now a debuggable scripted baseline, not yet a general pick-and-place planner.
