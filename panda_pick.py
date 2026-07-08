@@ -6,8 +6,9 @@ fit together in robosuite.
 """
 
 import argparse
+import csv
 import time
-
+from pathlib import Path
 
 
 def parse_args():
@@ -34,6 +35,12 @@ def parse_args():
         "--reset-on-done",
         action="store_true",
         help="Reset and continue if the environment reports done before --steps.",
+    )
+    parser.add_argument(
+        "--log-file",
+        type=Path,
+        default=None,
+        help="Optional CSV file path for per-step reward and position logging.",
     )
     return parser.parse_args()
 
@@ -83,9 +90,62 @@ def print_step_summary(step, obs, reward):
     print("Reward:", reward)
 
 
+def make_log_writer(log_file):
+    if log_file is None:
+        return None, None
+
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    handle = log_file.open("w", newline="")
+    writer = csv.DictWriter(
+        handle,
+        fieldnames=[
+            "step",
+            "reward",
+            "done",
+            "eef_x",
+            "eef_y",
+            "eef_z",
+            "cube_x",
+            "cube_y",
+            "cube_z",
+        ],
+    )
+    writer.writeheader()
+    return handle, writer
+
+
+def vector_components(obs, key):
+    value = obs.get(key)
+    if value is None or len(value) < 3:
+        return None, None, None
+    return float(value[0]), float(value[1]), float(value[2])
+
+
+def write_step_log(writer, step, obs, reward, done):
+    if writer is None:
+        return
+
+    eef_x, eef_y, eef_z = vector_components(obs, "robot0_eef_pos")
+    cube_x, cube_y, cube_z = vector_components(obs, "cube_pos")
+    writer.writerow(
+        {
+            "step": step,
+            "reward": float(reward),
+            "done": bool(done),
+            "eef_x": eef_x,
+            "eef_y": eef_y,
+            "eef_z": eef_z,
+            "cube_x": cube_x,
+            "cube_y": cube_y,
+            "cube_z": cube_z,
+        }
+    )
+
+
 def main():
     args = parse_args()
     env = make_env(has_renderer=not args.no_render)
+    log_handle, log_writer = make_log_writer(args.log_file)
 
     try:
         obs = env.reset()
@@ -111,6 +171,8 @@ def main():
             if args.print_every > 0 and step % args.print_every == 0:
                 print_step_summary(step, obs, reward)
 
+            write_step_log(log_writer, step, obs, reward, done)
+
             if done:
                 print(f"\nEnvironment returned done at step {step}.")
                 if not args.reset_on_done:
@@ -120,6 +182,9 @@ def main():
             if not args.no_render and args.sleep > 0:
                 time.sleep(args.sleep)
     finally:
+        if log_handle is not None:
+            log_handle.close()
+            print(f"Saved step log to {args.log_file}")
         env.close()
 
 

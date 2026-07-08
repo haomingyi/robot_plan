@@ -34,6 +34,12 @@ For a non-rendering smoke test:
 python panda_pick.py --no-render --steps 100 --print-every 20
 ```
 
+To save per-step rewards and positions for later analysis:
+
+```bash
+python panda_pick.py --no-render --steps 100 --print-every 20 --log-file logs/panda_pick.csv
+```
+
 ## Learning Roadmap
 
 1. Run the existing demo and understand the robosuite environment lifecycle:
@@ -60,6 +66,7 @@ python panda_pick.py --no-render --steps 100 --print-every 20
 4. Sends zero arm actions at first.
 5. Closes the gripper after step 100.
 6. Moves one action dimension between steps 200 and 300.
-7. Supports `--no-render`, `--steps`, `--print-every`, `--sleep`, and `--reset-on-done`.
+7. Supports `--no-render`, `--steps`, `--print-every`, `--sleep`, `--reset-on-done`, and `--log-file`.
+8. Can save per-step reward, done flag, end-effector position, and cube position to CSV.
 
 This is useful as a smoke test, but it is not yet a real pick-and-place policy.
