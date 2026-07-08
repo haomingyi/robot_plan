@@ -11,6 +11,10 @@ import time
 from pathlib import Path
 
 
+GRIPPER_OPEN = -1.0
+GRIPPER_CLOSE = 1.0
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Run a robosuite Panda Lift demo.")
     parser.add_argument("--steps", type=int, default=500, help="Number of control steps to run.")
@@ -44,9 +48,9 @@ def parse_args():
     )
     parser.add_argument(
         "--policy",
-        choices=("smoke", "approach"),
+        choices=("smoke", "approach", "pick"),
         default="smoke",
-        help="Scripted policy to run: smoke keeps the original simple action sequence; approach moves toward the cube.",
+        help="Scripted policy to run: smoke checks the environment; approach moves above the cube; pick approaches, descends, grasps, and lifts.",
     )
     return parser.parse_args()
 
@@ -75,7 +79,7 @@ def smoke_policy(action_dim, step, obs):
     action = zero_action(action_dim)
 
     if step > 100:
-        action[-1] = -1.0
+        action[-1] = GRIPPER_CLOSE
 
     if 200 < step < 300:
         action[0] = 0.2
@@ -83,37 +87,90 @@ def smoke_policy(action_dim, step, obs):
     return action
 
 
-def approach_policy(action_dim, step, obs):
-    """Move the end effector toward the cube using observed relative position.
+def relative_cube_offset(obs):
+    offset = obs.get("gripper_to_cube_pos")
+    if offset is None or len(offset) < 3:
+        return None
 
-    The default Panda controller accepts a small Cartesian delta in the first
-    three action dimensions, followed by orientation deltas and the gripper
-    command. This proportional controller is intentionally conservative.
-    """
+    import numpy as np
+
+    return np.asarray(offset, dtype=float)
+
+
+def move_to_relative_offset(action_dim, offset, desired_cube_below_gripper):
     import numpy as np
 
     action = zero_action(action_dim)
-    offset = obs.get("gripper_to_cube_pos")
+    error = offset - np.asarray(desired_cube_below_gripper, dtype=float)
+    action[:3] = np.clip(error * 2.0, -0.25, 0.25)
+    return action
 
-    if offset is None or len(offset) < 3:
+
+def approach_policy(action_dim, step, obs):
+    """Move the end effector to a hover pose above the cube."""
+    offset = relative_cube_offset(obs)
+    if offset is None:
         return smoke_policy(action_dim, step, obs)
 
-    target_offset = np.asarray(offset, dtype=float).copy()
-    target_offset[2] += 0.05
-    action[:3] = np.clip(target_offset * 2.0, -0.25, 0.25)
+    action = move_to_relative_offset(action_dim, offset, desired_cube_below_gripper=[0.0, 0.0, -0.05])
+    action[-1] = GRIPPER_OPEN
+    return action
 
-    if np.linalg.norm(target_offset[:2]) < 0.03 and abs(target_offset[2]) < 0.04:
-        action[-1] = -1.0
-    else:
-        action[-1] = 1.0
 
+def pick_policy(action_dim, step, obs):
+    """Simple staged pick attempt: hover, descend, close gripper, then lift."""
+    import numpy as np
+
+    offset = relative_cube_offset(obs)
+    if offset is None:
+        return smoke_policy(action_dim, step, obs)
+
+    xy_error = np.linalg.norm(offset[:2])
+    z_gap = offset[2]
+
+    if xy_error > 0.025 or z_gap < -0.065:
+        action = move_to_relative_offset(action_dim, offset, desired_cube_below_gripper=[0.0, 0.0, -0.05])
+        action[-1] = GRIPPER_OPEN
+        return action
+
+    if step < 150:
+        action = move_to_relative_offset(action_dim, offset, desired_cube_below_gripper=[0.0, 0.0, 0.0])
+        action[-1] = GRIPPER_OPEN
+        return action
+
+    if step < 220:
+        action = zero_action(action_dim)
+        action[-1] = GRIPPER_CLOSE
+        return action
+
+    action = zero_action(action_dim)
+    action[2] = 0.25
+    action[-1] = GRIPPER_CLOSE
     return action
 
 
 def scripted_action(action_dim, step, obs, policy):
     if policy == "approach":
         return approach_policy(action_dim, step, obs)
+    if policy == "pick":
+        return pick_policy(action_dim, step, obs)
     return smoke_policy(action_dim, step, obs)
+
+
+def obs_metrics(obs):
+    import math
+
+    eef_x, eef_y, eef_z = vector_components(obs, "robot0_eef_pos")
+    cube_x, cube_y, cube_z = vector_components(obs, "cube_pos")
+    if None in (eef_x, eef_y, eef_z, cube_x, cube_y, cube_z):
+        return None, None, None
+
+    dx = cube_x - eef_x
+    dy = cube_y - eef_y
+    dz = cube_z - eef_z
+    xy_distance = math.sqrt(dx * dx + dy * dy)
+    distance = math.sqrt(dx * dx + dy * dy + dz * dz)
+    return distance, xy_distance, dz
 
 
 def print_step_summary(step, obs, reward):
@@ -124,6 +181,12 @@ def print_step_summary(step, obs, reward):
 
     if "cube_pos" in obs:
         print("Cube position:", obs["cube_pos"])
+
+    distance, xy_distance, z_gap = obs_metrics(obs)
+    if distance is not None:
+        print("EEF-cube distance:", round(distance, 4))
+        print("EEF-cube XY distance:", round(xy_distance, 4))
+        print("Cube minus EEF Z:", round(z_gap, 4))
 
     print("Reward:", reward)
 
@@ -146,6 +209,9 @@ def make_log_writer(log_file):
             "cube_x",
             "cube_y",
             "cube_z",
+            "eef_cube_distance",
+            "eef_cube_xy_distance",
+            "cube_minus_eef_z",
         ],
     )
     writer.writeheader()
@@ -165,6 +231,7 @@ def write_step_log(writer, step, obs, reward, done):
 
     eef_x, eef_y, eef_z = vector_components(obs, "robot0_eef_pos")
     cube_x, cube_y, cube_z = vector_components(obs, "cube_pos")
+    distance, xy_distance, z_gap = obs_metrics(obs)
     writer.writerow(
         {
             "step": step,
@@ -176,6 +243,9 @@ def write_step_log(writer, step, obs, reward, done):
             "cube_x": cube_x,
             "cube_y": cube_y,
             "cube_z": cube_z,
+            "eef_cube_distance": distance,
+            "eef_cube_xy_distance": xy_distance,
+            "cube_minus_eef_z": z_gap,
         }
     )
 

@@ -46,6 +46,14 @@ To run the simple approach policy:
 python panda_pick.py --no-render --steps 200 --print-every 20 --policy approach --log-file logs/panda_approach.csv
 ```
 
+To run and verify a staged pick attempt without relying on the MuJoCo viewer:
+
+```bash
+python panda_pick.py --no-render --steps 400 --print-every 50 --policy pick --log-file logs/panda_pick.csv
+```
+
+A successful pick should show reward increasing to `1.0` and `cube_z` increasing in the CSV log.
+
 ## Learning Roadmap
 
 1. Run the existing demo and understand the robosuite environment lifecycle:
@@ -74,6 +82,7 @@ python panda_pick.py --no-render --steps 200 --print-every 20 --policy approach 
 6. Moves one action dimension between steps 200 and 300.
 7. Supports `--no-render`, `--steps`, `--print-every`, `--sleep`, `--reset-on-done`, `--log-file`, and `--policy`.
 8. Can save per-step reward, done flag, end-effector position, and cube position to CSV.
-9. Includes two scripted policies: `smoke` for environment checks and `approach` for moving the end effector toward the cube.
+9. Includes three scripted policies: `smoke` for environment checks, `approach` for moving above the cube, and `pick` for a staged lift attempt.
+10. Prints and logs distance diagnostics so policy behavior can be checked without relying on the MuJoCo viewer.
 
 This is useful as a smoke test, but it is not yet a real pick-and-place policy.
