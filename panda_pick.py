@@ -42,6 +42,12 @@ def parse_args():
         default=None,
         help="Optional CSV file path for per-step reward and position logging.",
     )
+    parser.add_argument(
+        "--policy",
+        choices=("smoke", "approach"),
+        default="smoke",
+        help="Scripted policy to run: smoke keeps the original simple action sequence; approach moves toward the cube.",
+    )
     return parser.parse_args()
 
 
@@ -58,16 +64,15 @@ def make_env(has_renderer):
     )
 
 
-def scripted_action(action_dim, step):
-    """Return a simple hand-written action for smoke testing.
-
-    Panda's default action uses arm control dimensions followed by one gripper
-    command. This action is not a real pick policy; it just verifies that control
-    commands change the simulation.
-    """
+def zero_action(action_dim):
     import numpy as np
 
-    action = np.zeros(action_dim)
+    return np.zeros(action_dim)
+
+
+def smoke_policy(action_dim, step, obs):
+    """Return the original simple hand-written smoke-test action."""
+    action = zero_action(action_dim)
 
     if step > 100:
         action[-1] = -1.0
@@ -76,6 +81,39 @@ def scripted_action(action_dim, step):
         action[0] = 0.2
 
     return action
+
+
+def approach_policy(action_dim, step, obs):
+    """Move the end effector toward the cube using observed relative position.
+
+    The default Panda controller accepts a small Cartesian delta in the first
+    three action dimensions, followed by orientation deltas and the gripper
+    command. This proportional controller is intentionally conservative.
+    """
+    import numpy as np
+
+    action = zero_action(action_dim)
+    offset = obs.get("gripper_to_cube_pos")
+
+    if offset is None or len(offset) < 3:
+        return smoke_policy(action_dim, step, obs)
+
+    target_offset = np.asarray(offset, dtype=float).copy()
+    target_offset[2] += 0.05
+    action[:3] = np.clip(target_offset * 2.0, -0.25, 0.25)
+
+    if np.linalg.norm(target_offset[:2]) < 0.03 and abs(target_offset[2]) < 0.04:
+        action[-1] = -1.0
+    else:
+        action[-1] = 1.0
+
+    return action
+
+
+def scripted_action(action_dim, step, obs, policy):
+    if policy == "approach":
+        return approach_policy(action_dim, step, obs)
+    return smoke_policy(action_dim, step, obs)
 
 
 def print_step_summary(step, obs, reward):
@@ -155,6 +193,7 @@ def main():
         print("Action dimension:", env.action_dim)
         print("Render enabled:", not args.no_render)
         print("Steps:", args.steps)
+        print("Policy:", args.policy)
         print("==============================")
 
         print("\nObservation keys:")
@@ -162,7 +201,7 @@ def main():
             print("-", key)
 
         for step in range(args.steps):
-            action = scripted_action(env.action_dim, step)
+            action = scripted_action(env.action_dim, step, obs, args.policy)
             obs, reward, done, info = env.step(action)
 
             if not args.no_render:

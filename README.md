@@ -40,6 +40,12 @@ To save per-step rewards and positions for later analysis:
 python panda_pick.py --no-render --steps 100 --print-every 20 --log-file logs/panda_pick.csv
 ```
 
+To run the simple approach policy:
+
+```bash
+python panda_pick.py --no-render --steps 200 --print-every 20 --policy approach --log-file logs/panda_approach.csv
+```
+
 ## Learning Roadmap
 
 1. Run the existing demo and understand the robosuite environment lifecycle:
@@ -66,7 +72,8 @@ python panda_pick.py --no-render --steps 100 --print-every 20 --log-file logs/pa
 4. Sends zero arm actions at first.
 5. Closes the gripper after step 100.
 6. Moves one action dimension between steps 200 and 300.
-7. Supports `--no-render`, `--steps`, `--print-every`, `--sleep`, `--reset-on-done`, and `--log-file`.
+7. Supports `--no-render`, `--steps`, `--print-every`, `--sleep`, `--reset-on-done`, `--log-file`, and `--policy`.
 8. Can save per-step reward, done flag, end-effector position, and cube position to CSV.
+9. Includes two scripted policies: `smoke` for environment checks and `approach` for moving the end effector toward the cube.
 
 This is useful as a smoke test, but it is not yet a real pick-and-place policy.
