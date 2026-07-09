@@ -1,4 +1,4 @@
-"""Run repeated headless Panda Lift policy evaluations."""
+"""Run repeated headless manipulation policy evaluations."""
 
 import argparse
 import csv
@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Evaluate panda_pick.py over repeated runs.")
+    parser = argparse.ArgumentParser(description="Evaluate manipulation_benchmark.py over repeated runs.")
     parser.add_argument("--runs", type=int, default=5, help="Number of runs to execute.")
     parser.add_argument("--steps", type=int, default=400, help="Steps per run.")
     parser.add_argument("--policy", default="pick", choices=("smoke", "approach", "pick"))
@@ -43,7 +43,7 @@ def main():
         log_file = args.output_dir / f"run_{run_idx:03d}.csv"
         cmd = [
             sys.executable,
-            str(repo_root / "panda_pick.py"),
+            str(repo_root / "manipulation_benchmark.py"),
             "--no-render",
             "--steps",
             str(args.steps),

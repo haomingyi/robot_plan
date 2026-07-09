@@ -1,4 +1,4 @@
-"""Run and inspect simple robosuite Panda Lift policies.
+"""Run and inspect robosuite manipulation policies.
 
 The script is intentionally lightweight, but it is structured for debugging:
 policies are selectable, per-step diagnostics can be logged, and the staged pick
@@ -16,7 +16,7 @@ GRIPPER_CLOSE = 1.0
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run a robosuite Panda Lift demo.")
+    parser = argparse.ArgumentParser(description="Run a robosuite manipulation benchmark.")
     parser.add_argument("--steps", type=int, default=500, help="Number of control steps to run.")
     parser.add_argument(
         "--print-every",
@@ -34,6 +34,34 @@ def parse_args():
         "--no-render",
         action="store_true",
         help="Run without the interactive robosuite renderer.",
+    )
+    parser.add_argument(
+        "--viewer",
+        choices=("robosuite", "mujoco"),
+        default="robosuite",
+        help="Interactive viewer to use when rendering: robosuite opens the default robosuite window; mujoco opens the official MuJoCo debug UI.",
+    )
+    parser.add_argument(
+        "--pause-at-start",
+        action="store_true",
+        help="Start paused when using --viewer mujoco.",
+    )
+    parser.add_argument(
+        "--keep-viewer-open",
+        action="store_true",
+        help="Keep the official MuJoCo viewer open after the scripted run ends.",
+    )
+    parser.add_argument(
+        "--frame-length",
+        type=float,
+        default=0.2,
+        help="Viewer coordinate frame axis length for MuJoCo debug rendering.",
+    )
+    parser.add_argument(
+        "--frame-width",
+        type=float,
+        default=0.02,
+        help="Viewer coordinate frame axis width for MuJoCo debug rendering.",
     )
     parser.add_argument(
         "--reset-on-done",
@@ -58,6 +86,17 @@ def parse_args():
         default=0.90,
         help="Cube height threshold used for the final success summary.",
     )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Print compact per-step policy diagnostics while the simulation runs.",
+    )
+    parser.add_argument(
+        "--debug-every",
+        type=int,
+        default=10,
+        help="Print debug diagnostics every N steps when --debug is enabled.",
+    )
     return parser.parse_args()
 
 
@@ -72,6 +111,76 @@ def make_env(has_renderer):
         use_camera_obs=False,
         control_freq=20,
     )
+
+
+def make_mujoco_viewer(env, paused=False, frame_length=0.2, frame_width=0.02):
+    import mujoco
+    import mujoco.viewer
+
+    state = {"paused": paused, "single_step": False, "reset": False}
+
+    def key_callback(keycode):
+        # GLFW key codes: space=32, N=78, R=82.
+        if keycode == 32:
+            state["paused"] = not state["paused"]
+        elif keycode in (78, 110):
+            state["single_step"] = True
+            state["paused"] = True
+        elif keycode in (82, 114):
+            state["reset"] = True
+
+    model = env.sim.model._model
+    data = env.sim.data._data
+    model.vis.scale.framelength = frame_length
+    model.vis.scale.framewidth = frame_width
+    viewer = mujoco.viewer.launch_passive(
+        model,
+        data,
+        key_callback=key_callback,
+        show_left_ui=True,
+        show_right_ui=True,
+    )
+    return viewer, state
+
+
+def sync_mujoco_viewer(viewer, viewer_state, step, policy, reward, summary):
+    import mujoco
+
+    status = "paused" if viewer_state["paused"] else "running"
+    phase = getattr(policy, "phase", "")
+    viewer.set_texts(
+        [
+            (
+                mujoco.mjtFontScale.mjFONTSCALE_150,
+                mujoco.mjtGridPos.mjGRID_TOPLEFT,
+                "manipulation_benchmark",
+                f"{status} | step {step} | phase {phase} | reward {float(reward):.3f}",
+            ),
+            (
+                mujoco.mjtFontScale.mjFONTSCALE_150,
+                mujoco.mjtGridPos.mjGRID_BOTTOMLEFT,
+                "keys",
+                "Space pause/resume | N step while paused | R reset | Esc/window close exit",
+            ),
+            (
+                mujoco.mjtFontScale.mjFONTSCALE_150,
+                mujoco.mjtGridPos.mjGRID_BOTTOMRIGHT,
+                "max",
+                f"reward {summary['max_reward']:.3f} | cube_z {summary['max_cube_z']:.3f}",
+            ),
+        ]
+    )
+    viewer.sync()
+
+
+def keep_mujoco_viewer_open(viewer, viewer_state, step, policy, reward, summary, sleep):
+    print("\nScripted run ended. MuJoCo viewer will stay open until you close the window.")
+    print("Use the MuJoCo UI for inspection. Press R to reset, then close the window when done.")
+    viewer_state["paused"] = True
+    while viewer.is_running():
+        sync_mujoco_viewer(viewer, viewer_state, step, policy, reward, summary)
+        if sleep > 0:
+            time.sleep(sleep)
 
 
 def zero_action(action_dim):
@@ -190,7 +299,7 @@ class PickPolicy:
             action[-1] = GRIPPER_OPEN
 
         elif self.phase == "grasp":
-            if self.phase_steps >= 55:
+            if self.phase_steps >= 80:
                 self.set_phase("lift")
             action = zero_action(action_dim)
             action[-1] = GRIPPER_CLOSE
@@ -231,6 +340,35 @@ def print_step_summary(step, obs, reward, policy):
         print("Cube minus EEF Z:", round(z_gap, 4))
 
     print("Reward:", reward)
+
+
+def format_vector(value, digits=3):
+    if value is None:
+        return "None"
+    return "[" + ", ".join(f"{float(item):.{digits}f}" for item in value) + "]"
+
+
+def print_debug_summary(step, action, obs, reward, done, policy):
+    distance, xy_distance, z_gap = obs_metrics(obs)
+    offset = relative_cube_offset(obs)
+    phase = getattr(policy, "phase", "")
+    phase_steps = getattr(policy, "phase_steps", "")
+    gripper_qpos = obs.get("robot0_gripper_qpos")
+
+    print(
+        "DEBUG "
+        f"step={step:04d} "
+        f"phase={phase} "
+        f"phase_steps={phase_steps} "
+        f"action={format_vector(action)} "
+        f"gripper={format_vector(gripper_qpos)} "
+        f"offset={format_vector(offset)} "
+        f"dist={None if distance is None else round(distance, 4)} "
+        f"xy={None if xy_distance is None else round(xy_distance, 4)} "
+        f"z_gap={None if z_gap is None else round(z_gap, 4)} "
+        f"reward={round(float(reward), 4)} "
+        f"done={bool(done)}"
+    )
 
 
 def make_log_writer(log_file):
@@ -307,36 +445,82 @@ def print_final_summary(summary, success_cube_z):
 
 def main():
     args = parse_args()
-    env = make_env(has_renderer=not args.no_render)
+    env = make_env(has_renderer=not args.no_render and args.viewer == "robosuite")
     policy = make_policy(args.policy)
     log_handle, log_writer = make_log_writer(args.log_file)
     summary = {"max_reward": 0.0, "max_cube_z": float("-inf")}
+    mujoco_viewer = None
+    mujoco_viewer_state = None
 
     try:
         obs = env.reset()
+        if not args.no_render and args.viewer == "mujoco":
+            mujoco_viewer, mujoco_viewer_state = make_mujoco_viewer(
+                env,
+                paused=args.pause_at_start,
+                frame_length=args.frame_length,
+                frame_width=args.frame_width,
+            )
 
         print("==============================")
         print("Environment loaded")
         print("Action dimension:", env.action_dim)
         print("Render enabled:", not args.no_render)
+        print("Viewer:", "none" if args.no_render else args.viewer)
         print("Steps:", args.steps)
         print("Policy:", args.policy)
+        print("Debug:", args.debug)
         print("==============================")
 
         print("\nObservation keys:")
         for key in obs.keys():
             print("-", key)
 
-        for step in range(args.steps):
+        last_debug_phase = getattr(policy, "phase", None)
+
+        step = 0
+        reward = 0.0
+        done = False
+        while step < args.steps:
+            if mujoco_viewer is not None and not mujoco_viewer.is_running():
+                print("\nMuJoCo viewer closed.")
+                break
+
+            if mujoco_viewer_state is not None and mujoco_viewer_state["reset"]:
+                obs = env.reset()
+                policy = make_policy(args.policy)
+                summary = {"max_reward": 0.0, "max_cube_z": float("-inf")}
+                last_debug_phase = getattr(policy, "phase", None)
+                mujoco_viewer_state["reset"] = False
+                print("\nEnvironment reset from MuJoCo viewer.")
+
+            if mujoco_viewer_state is not None and mujoco_viewer_state["paused"]:
+                if not mujoco_viewer_state["single_step"]:
+                    sync_mujoco_viewer(mujoco_viewer, mujoco_viewer_state, step, policy, reward, summary)
+                    if args.sleep > 0:
+                        time.sleep(args.sleep)
+                    continue
+                mujoco_viewer_state["single_step"] = False
+
             action = policy.act(env.action_dim, step, obs)
             obs, reward, done, info = env.step(action)
             update_summary(summary, obs, reward)
 
-            if not args.no_render:
+            if mujoco_viewer is not None:
+                sync_mujoco_viewer(mujoco_viewer, mujoco_viewer_state, step, policy, reward, summary)
+            elif not args.no_render:
                 env.render()
 
             if args.print_every > 0 and step % args.print_every == 0:
                 print_step_summary(step, obs, reward, policy)
+
+            current_phase = getattr(policy, "phase", None)
+            phase_changed = current_phase != last_debug_phase
+            if args.debug and (
+                phase_changed or (args.debug_every > 0 and step % args.debug_every == 0)
+            ):
+                print_debug_summary(step, action, obs, reward, done, policy)
+            last_debug_phase = current_phase
 
             write_step_log(log_writer, step, obs, reward, done, policy)
 
@@ -349,9 +533,22 @@ def main():
 
             if not args.no_render and args.sleep > 0:
                 time.sleep(args.sleep)
+            step += 1
 
         print_final_summary(summary, args.success_cube_z)
+        if mujoco_viewer is not None and args.keep_viewer_open:
+            keep_mujoco_viewer_open(
+                mujoco_viewer,
+                mujoco_viewer_state,
+                step,
+                policy,
+                reward,
+                summary,
+                args.sleep,
+            )
     finally:
+        if mujoco_viewer is not None:
+            mujoco_viewer.close()
         if log_handle is not None:
             log_handle.close()
             print(f"Saved step log to {args.log_file}")
