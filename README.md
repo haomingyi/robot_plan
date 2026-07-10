@@ -16,13 +16,13 @@ brand itself.
 - `scripts/evaluate_policy.py`: runs repeated headless policy checks and writes a
   summary CSV with success rate, max reward, and max cube height.
 - `run_viewer.sh`: starts the official MuJoCo viewer with the benchmark policy
-  and keeps the window open for inspection after the run.
+  and keeps the window open for inspection or reruns after the first demo.
 
 ## Capabilities
 
 - Scripted manipulation baselines with explicit policy phases.
 - Official MuJoCo viewer integration for pause, stepping, contact inspection,
-  and rendering debug overlays.
+  rendering debug overlays, and repeated demos from the same viewer window.
 - Per-step CSV logging for reward, end-effector pose, object pose, distance, and
   policy phase.
 - Repeated headless evaluation for success-rate tracking.

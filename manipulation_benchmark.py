@@ -160,7 +160,7 @@ def sync_mujoco_viewer(viewer, viewer_state, step, policy, reward, summary):
                 mujoco.mjtFontScale.mjFONTSCALE_150,
                 mujoco.mjtGridPos.mjGRID_BOTTOMLEFT,
                 "keys",
-                "Space pause/resume | N step while paused | R reset | Esc/window close exit",
+                "Space pause/resume | N step while paused | R rerun/reset | close window exit",
             ),
             (
                 mujoco.mjtFontScale.mjFONTSCALE_150,
@@ -173,14 +173,20 @@ def sync_mujoco_viewer(viewer, viewer_state, step, policy, reward, summary):
     viewer.sync()
 
 
-def keep_mujoco_viewer_open(viewer, viewer_state, step, policy, reward, summary, sleep):
+def wait_for_rerun_or_close(viewer, viewer_state, step, policy, reward, summary, sleep):
     print("\nScripted run ended. MuJoCo viewer will stay open until you close the window.")
-    print("Use the MuJoCo UI for inspection. Press R to reset, then close the window when done.")
+    print("Press R to reset and run the policy again, or close the window when done.")
     viewer_state["paused"] = True
     while viewer.is_running():
+        if viewer_state["reset"]:
+            viewer_state["reset"] = False
+            viewer_state["paused"] = False
+            viewer_state["single_step"] = False
+            return True
         sync_mujoco_viewer(viewer, viewer_state, step, policy, reward, summary)
         if sleep > 0:
             time.sleep(sleep)
+    return False
 
 
 def zero_action(action_dim):
@@ -443,12 +449,99 @@ def print_final_summary(summary, success_cube_z):
     print("==============================")
 
 
+def print_environment_header(args, env, obs):
+    print("==============================")
+    print("Environment loaded")
+    print("Action dimension:", env.action_dim)
+    print("Render enabled:", not args.no_render)
+    print("Viewer:", "none" if args.no_render else args.viewer)
+    print("Steps:", args.steps)
+    print("Policy:", args.policy)
+    print("Debug:", args.debug)
+    print("==============================")
+
+    print("\nObservation keys:")
+    for key in obs.keys():
+        print("-", key)
+
+
+def run_episode(args, env, obs, policy, log_writer, mujoco_viewer, mujoco_viewer_state):
+    summary = {"max_reward": 0.0, "max_cube_z": float("-inf")}
+    last_debug_phase = getattr(policy, "phase", None)
+    step = 0
+    reward = 0.0
+    done = False
+
+    while step < args.steps:
+        if mujoco_viewer is not None and not mujoco_viewer.is_running():
+            print("\nMuJoCo viewer closed.")
+            break
+
+        if mujoco_viewer_state is not None and mujoco_viewer_state["reset"]:
+            mujoco_viewer_state["reset"] = False
+            print("\nRerun requested from MuJoCo viewer.")
+            return obs, policy, step, reward, summary, True
+
+        if mujoco_viewer_state is not None and mujoco_viewer_state["paused"]:
+            if not mujoco_viewer_state["single_step"]:
+                sync_mujoco_viewer(mujoco_viewer, mujoco_viewer_state, step, policy, reward, summary)
+                if args.sleep > 0:
+                    time.sleep(args.sleep)
+                continue
+            mujoco_viewer_state["single_step"] = False
+
+        action = policy.act(env.action_dim, step, obs)
+        obs, reward, done, info = env.step(action)
+        update_summary(summary, obs, reward)
+
+        if mujoco_viewer is not None:
+            sync_mujoco_viewer(mujoco_viewer, mujoco_viewer_state, step, policy, reward, summary)
+        elif not args.no_render:
+            env.render()
+
+        if args.print_every > 0 and step % args.print_every == 0:
+            print_step_summary(step, obs, reward, policy)
+
+        current_phase = getattr(policy, "phase", None)
+        phase_changed = current_phase != last_debug_phase
+        if args.debug and (
+            phase_changed or (args.debug_every > 0 and step % args.debug_every == 0)
+        ):
+            print_debug_summary(step, action, obs, reward, done, policy)
+        last_debug_phase = current_phase
+
+        write_step_log(log_writer, step, obs, reward, done, policy)
+
+        if done:
+            print(f"\nEnvironment returned done at step {step}.")
+            if not args.reset_on_done:
+                break
+            obs = env.reset()
+            policy = make_policy(args.policy)
+
+        if not args.no_render and args.sleep > 0:
+            time.sleep(args.sleep)
+        step += 1
+
+    return obs, policy, step, reward, summary, False
+
+
+def restart_mujoco_viewer(args, env, mujoco_viewer):
+    if mujoco_viewer is not None:
+        mujoco_viewer.close()
+        time.sleep(0.1)
+    return make_mujoco_viewer(
+        env,
+        paused=False,
+        frame_length=args.frame_length,
+        frame_width=args.frame_width,
+    )
+
+
 def main():
     args = parse_args()
     env = make_env(has_renderer=not args.no_render and args.viewer == "robosuite")
-    policy = make_policy(args.policy)
     log_handle, log_writer = make_log_writer(args.log_file)
-    summary = {"max_reward": 0.0, "max_cube_z": float("-inf")}
     mujoco_viewer = None
     mujoco_viewer_state = None
 
@@ -462,82 +555,35 @@ def main():
                 frame_width=args.frame_width,
             )
 
-        print("==============================")
-        print("Environment loaded")
-        print("Action dimension:", env.action_dim)
-        print("Render enabled:", not args.no_render)
-        print("Viewer:", "none" if args.no_render else args.viewer)
-        print("Steps:", args.steps)
-        print("Policy:", args.policy)
-        print("Debug:", args.debug)
-        print("==============================")
+        print_environment_header(args, env, obs)
 
-        print("\nObservation keys:")
-        for key in obs.keys():
-            print("-", key)
+        while True:
+            policy = make_policy(args.policy)
+            obs, policy, step, reward, summary, rerun_requested = run_episode(
+                args,
+                env,
+                obs,
+                policy,
+                log_writer,
+                mujoco_viewer,
+                mujoco_viewer_state,
+            )
+            print_final_summary(summary, args.success_cube_z)
 
-        last_debug_phase = getattr(policy, "phase", None)
-
-        step = 0
-        reward = 0.0
-        done = False
-        while step < args.steps:
-            if mujoco_viewer is not None and not mujoco_viewer.is_running():
-                print("\nMuJoCo viewer closed.")
+            if mujoco_viewer is None:
                 break
 
-            if mujoco_viewer_state is not None and mujoco_viewer_state["reset"]:
+            if rerun_requested:
                 obs = env.reset()
-                policy = make_policy(args.policy)
-                summary = {"max_reward": 0.0, "max_cube_z": float("-inf")}
-                last_debug_phase = getattr(policy, "phase", None)
-                mujoco_viewer_state["reset"] = False
-                print("\nEnvironment reset from MuJoCo viewer.")
+                mujoco_viewer, mujoco_viewer_state = restart_mujoco_viewer(args, env, mujoco_viewer)
+                if log_writer is not None:
+                    print("Log file already contains the first run; reruns are viewer-only.")
+                print("\nRunning policy again from reset.")
+                continue
 
-            if mujoco_viewer_state is not None and mujoco_viewer_state["paused"]:
-                if not mujoco_viewer_state["single_step"]:
-                    sync_mujoco_viewer(mujoco_viewer, mujoco_viewer_state, step, policy, reward, summary)
-                    if args.sleep > 0:
-                        time.sleep(args.sleep)
-                    continue
-                mujoco_viewer_state["single_step"] = False
-
-            action = policy.act(env.action_dim, step, obs)
-            obs, reward, done, info = env.step(action)
-            update_summary(summary, obs, reward)
-
-            if mujoco_viewer is not None:
-                sync_mujoco_viewer(mujoco_viewer, mujoco_viewer_state, step, policy, reward, summary)
-            elif not args.no_render:
-                env.render()
-
-            if args.print_every > 0 and step % args.print_every == 0:
-                print_step_summary(step, obs, reward, policy)
-
-            current_phase = getattr(policy, "phase", None)
-            phase_changed = current_phase != last_debug_phase
-            if args.debug and (
-                phase_changed or (args.debug_every > 0 and step % args.debug_every == 0)
-            ):
-                print_debug_summary(step, action, obs, reward, done, policy)
-            last_debug_phase = current_phase
-
-            write_step_log(log_writer, step, obs, reward, done, policy)
-
-            if done:
-                print(f"\nEnvironment returned done at step {step}.")
-                if not args.reset_on_done:
-                    break
-                obs = env.reset()
-                policy = make_policy(args.policy)
-
-            if not args.no_render and args.sleep > 0:
-                time.sleep(args.sleep)
-            step += 1
-
-        print_final_summary(summary, args.success_cube_z)
-        if mujoco_viewer is not None and args.keep_viewer_open:
-            keep_mujoco_viewer_open(
+            if not args.keep_viewer_open:
+                break
+            if not wait_for_rerun_or_close(
                 mujoco_viewer,
                 mujoco_viewer_state,
                 step,
@@ -545,7 +591,14 @@ def main():
                 reward,
                 summary,
                 args.sleep,
-            )
+            ):
+                break
+
+            obs = env.reset()
+            mujoco_viewer, mujoco_viewer_state = restart_mujoco_viewer(args, env, mujoco_viewer)
+            if log_writer is not None:
+                print("Log file already contains the first run; reruns are viewer-only.")
+            print("\nRunning policy again from reset.")
     finally:
         if mujoco_viewer is not None:
             mujoco_viewer.close()
