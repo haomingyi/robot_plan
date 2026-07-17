@@ -15,6 +15,8 @@ brand itself.
   optional CSV logs.
 - `scripts/evaluate_policy.py`: runs repeated headless policy checks and writes a
   summary CSV with success rate, max reward, and max cube height.
+- `scripts/plot_run.py`: turns a per-step CSV log into a diagnostic plot for
+  reward, object height, end-effector distance, and policy phases.
 - `run_viewer.sh`: starts the official MuJoCo viewer with the benchmark policy
   and keeps the window open for inspection or reruns after the first demo.
 
@@ -25,6 +27,8 @@ brand itself.
   rendering debug overlays, and repeated demos from the same viewer window.
 - Per-step CSV logging for reward, end-effector pose, object pose, distance, and
   policy phase.
+- Plot generation for single-run logs, including phase backgrounds, reward,
+  object height, and distance diagnostics.
 - Repeated headless evaluation for success-rate tracking.
 - Tunable viewer diagnostics such as coordinate-frame length and width.
 
@@ -80,6 +84,12 @@ python scripts/evaluate_policy.py --runs 5 --steps 400 --policy pick
 
 This writes per-run logs under `logs/eval_pick/` and a summary CSV at `logs/eval_pick_summary.csv`.
 
+To visualize a single run log:
+
+```bash
+python scripts/plot_run.py logs/pick.csv --output outputs/pick_diagnostics.png
+```
+
 ## Roadmap
 
 1. Run the existing demo and understand the robosuite environment lifecycle:
@@ -91,9 +101,10 @@ This writes per-run logs under `logs/eval_pick/` and a summary CSV at `logs/eval
 4. Replace the fixed action script with staged behavior:
    move above cube, descend, close gripper, lift.
 5. Add logging for observations, rewards, and success signals.
-6. Try different controllers and compare behavior.
-7. Add camera observations and save images or videos.
-8. Use the same task for imitation learning or reinforcement learning
+6. Add plots and summary artifacts for experiment review.
+7. Try different controllers and compare behavior.
+8. Add camera observations and save images or videos.
+9. Use the same task for imitation learning or reinforcement learning
    experiments.
 
 ## Script Behavior
