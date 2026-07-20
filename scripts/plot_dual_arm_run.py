@@ -7,12 +7,15 @@ from pathlib import Path
 
 STAGE_COLORS = {
     "drive_forward": "#60a5fa",
+    "pregrasp_objects": "#eab308",
     "approach_objects": "#f59e0b",
     "close_grippers": "#ef4444",
-    "lift_objects": "#22c55e",
+    "lift_workpiece": "#22c55e",
+    "lift_tray": "#0d9488",
     "align_over_tray": "#8b5cf6",
     "lower_into_tray": "#14b8a6",
     "release_workpiece": "#64748b",
+    "left_clear": "#475569",
     "left_retreat": "#94a3b8",
 }
 
