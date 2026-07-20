@@ -35,15 +35,16 @@ RIGHT_JOINTS = [name[:-4] for name in RIGHT_ARM]
 OPEN_GRIPPER = -0.014
 CLOSED_GRIPPER = -0.002
 
-PICK_POS = np.array([0.0, 0.92, 0.511])
-LIFT_POS = np.array([0.0, 0.90, 0.548])
-PLACE_POS = np.array([0.0, 0.96, 0.548])
-PLACE_SETTLE_POS = np.array([0.0, 0.96, 0.511])
+PICK_POS = np.array([-0.18, 0.92, 0.461])
+LIFT_POS = np.array([-0.18, 0.9204, 0.620])
+PLACE_POS = np.array([0.025, 0.9535, 0.648])
+PLACE_SETTLE_POS = np.array([0.025, 0.9535, 0.554])
 
-TRAY_POS = np.array([0.0, 0.905, 0.465])
-TRAY_TARGET_LOCAL = np.array([0.0, 0.055, 0.046])
+TRAY_POS = np.array([0.20, 0.92, 0.453])
+TRAY_RELEASE_LOCAL = np.array([-0.075, 0.055, 0.046])
+TRAY_TARGET_LOCAL = np.array([-0.075, 0.055, 0.016])
 LEFT_GRIP_WORKPIECE_OFFSET = np.array([0.061, 0.011, -0.032])
-RIGHT_GRIP_TRAY_OFFSET = np.array([-0.0055, 0.1438, -0.0369])
+RIGHT_GRIP_TRAY_OFFSET = np.array([-0.229724, 0.000401, -0.062998])
 PLACEMENT_SUCCESS_THRESHOLD = 0.03
 BASE_SUCCESS_THRESHOLD = 0.03
 
@@ -71,30 +72,33 @@ def arr(values):
 # move the grippers forward in world +Y. The arms stay on their own side of X=0.
 DRIVE_READY_L = arr([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
 DRIVE_READY_R = arr([0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
-APPROACH_L = arr([-0.38, 0.0, 0.0, 0.50, 0.0, 0.08, 0.0])
-APPROACH_R = arr([0.38, 0.0, 0.0, -0.50, 0.0, -0.08, 0.0])
-GRASP_L = arr([-0.38, 0.0, 0.0, 0.50, 0.0, 0.08, 0.0])
-GRASP_R = arr([0.38, 0.0, 0.0, -0.50, 0.0, -0.08, 0.0])
-LIFT_L = arr([-0.36, -0.04, 0.0, 0.46, 0.0, 0.06, 0.0])
-LIFT_R = arr([0.36, 0.04, 0.0, -0.46, 0.0, -0.06, 0.0])
-PLACE_L = arr([-0.459, 0.1213, 0.0, 0.8316, 0.0, 0.3195, 0.0])
-TRAY_GRASP_R = arr([0.15, 0.25, 0.0, -0.2, 0.0, 0.0, 0.0])
-TRAY_HOLD_R = arr([0.15, -0.05, 0.0, -0.575, 0.0, 0.15, 0.0])
+APPROACH_L = arr([-0.353736, -0.000241, -0.007819, 0.185967, 0.001269, 0.189692, -0.000316])
+APPROACH_R = arr([0.379224, -0.132873, -0.012983, 0.118708, 0.102672, 0.000660, -0.004003])
+DRIVE_PREGRASP_R = arr([0.532764, -0.752431, 0.522304, -0.436444, -0.102910, 0.604021, 0.704484])
+PREGRASP_R = arr([0.674912, -0.595109, 0.393138, -0.212658, -0.059856, 0.373656, 0.484919])
+GRASP_L = APPROACH_L
+LIFT_L = arr([-0.692270, 0.491436, 0.302090, 0.979394, -0.704785, 0.948135, 0.744279])
+ALIGN_L = arr([-0.616507, 0.205783, 0.391027, 1.001065, -0.728551, 0.695610, 0.549706])
+PLACE_L = arr([-0.484896, -0.029516, 0.319923, 0.657655, -0.454428, 0.454606, 0.223979])
+TRAY_GRASP_R = APPROACH_R
+TRAY_HOLD_R = arr([0.460429, -0.560276, -0.015683, -0.385228, 0.134940, 0.502793, 0.456177])
 PLACE_R = TRAY_HOLD_R
 RELEASE_L = PLACE_L
-RELEASE_R = PLACE_R
+CLEAR_L = ALIGN_L
 RETREAT_L = DRIVE_READY_L
-RETREAT_R = DRIVE_READY_R
 
 STAGES = [
     Stage("start", 0.5, -0.20, DRIVE_READY_L, DRIVE_READY_R, OPEN_GRIPPER, OPEN_GRIPPER, PICK_POS, False, False),
-    Stage("drive_forward", 2.0, 0.25, DRIVE_READY_L, DRIVE_READY_R, OPEN_GRIPPER, OPEN_GRIPPER, PICK_POS, False, False),
-    Stage("approach_objects", 1.4, 0.25, APPROACH_L, TRAY_GRASP_R, OPEN_GRIPPER, OPEN_GRIPPER, PICK_POS, False, False),
+    Stage("drive_forward", 2.0, 0.25, DRIVE_READY_L, DRIVE_PREGRASP_R, OPEN_GRIPPER, OPEN_GRIPPER, PICK_POS, False, False),
+    Stage("pregrasp_objects", 0.8, 0.25, APPROACH_L, PREGRASP_R, OPEN_GRIPPER, OPEN_GRIPPER, PICK_POS, False, False),
+    Stage("approach_objects", 0.7, 0.25, APPROACH_L, TRAY_GRASP_R, OPEN_GRIPPER, OPEN_GRIPPER, PICK_POS, False, False),
     Stage("close_grippers", 0.6, 0.25, GRASP_L, TRAY_GRASP_R, CLOSED_GRIPPER, CLOSED_GRIPPER, PICK_POS, False, False),
-    Stage("lift_objects", 1.1, 0.25, LIFT_L, TRAY_HOLD_R, CLOSED_GRIPPER, CLOSED_GRIPPER, LIFT_POS, True, True),
-    Stage("align_over_tray", 1.5, 0.25, PLACE_L, PLACE_R, CLOSED_GRIPPER, CLOSED_GRIPPER, PLACE_POS, True, True),
-    Stage("lower_into_tray", 0.8, 0.25, PLACE_L, PLACE_R, CLOSED_GRIPPER, CLOSED_GRIPPER, PLACE_SETTLE_POS, True, True),
-    Stage("release_workpiece", 0.7, 0.25, RELEASE_L, PLACE_R, OPEN_GRIPPER, CLOSED_GRIPPER, PLACE_SETTLE_POS, False, True),
+    Stage("lift_workpiece", 1.1, 0.25, LIFT_L, TRAY_GRASP_R, CLOSED_GRIPPER, CLOSED_GRIPPER, LIFT_POS, True, False),
+    Stage("lift_tray", 0.8, 0.25, LIFT_L, TRAY_HOLD_R, CLOSED_GRIPPER, CLOSED_GRIPPER, LIFT_POS, True, True),
+    Stage("align_over_tray", 1.3, 0.25, ALIGN_L, PLACE_R, CLOSED_GRIPPER, CLOSED_GRIPPER, PLACE_POS, True, True),
+    Stage("lower_into_tray", 1.0, 0.25, PLACE_L, PLACE_R, CLOSED_GRIPPER, CLOSED_GRIPPER, PLACE_SETTLE_POS, True, True),
+    Stage("release_workpiece", 1.0, 0.25, RELEASE_L, PLACE_R, OPEN_GRIPPER, CLOSED_GRIPPER, PLACE_SETTLE_POS, False, True),
+    Stage("left_clear", 0.9, 0.25, CLEAR_L, PLACE_R, OPEN_GRIPPER, CLOSED_GRIPPER, PLACE_SETTLE_POS, False, True),
     Stage("left_retreat", 1.3, 0.25, RETREAT_L, PLACE_R, OPEN_GRIPPER, CLOSED_GRIPPER, PLACE_SETTLE_POS, False, True),
 ]
 
@@ -119,6 +123,19 @@ def build_maps(model):
 def site_pos(model, data, name):
     site_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, name)
     return data.site_xpos[site_id].copy()
+
+
+def contact_count_between_bodies(model, data, first_body_name, second_body_name):
+    first_body = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, first_body_name)
+    second_body = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, second_body_name)
+    count = 0
+    for index in range(data.ncon):
+        contact = data.contact[index]
+        first_contact_body = model.geom_bodyid[contact.geom1]
+        second_contact_body = model.geom_bodyid[contact.geom2]
+        if {first_contact_body, second_contact_body} == {first_body, second_body}:
+            count += 1
+    return count
 
 
 def set_base_pose(model, data, joint_qpos, actuator_id, base_y, wheel_angle):
@@ -149,12 +166,8 @@ def set_joint_pose(data, joint_qpos, actuator_id, left, right, left_gripper, rig
 
     for actuator_name in ("left_finger_r_pos", "left_finger_l_pos"):
         data.ctrl[actuator_id[actuator_name]] = left_gripper
-    for joint_name in ("joint_left_finger_r", "joint_left_finger_l"):
-        data.qpos[joint_qpos[joint_name]] = left_gripper
     for actuator_name in ("right_finger_r_pos", "right_finger_l_pos"):
         data.ctrl[actuator_id[actuator_name]] = right_gripper
-    for joint_name in ("joint_right_finger_r", "joint_right_finger_l"):
-        data.qpos[joint_qpos[joint_name]] = right_gripper
 
 
 def set_workpiece_pose(model, data, joint_qpos, pos):
@@ -226,6 +239,9 @@ def make_log_row(model, data, joint_qpos, t, stage_name, tray_target):
         "target_y": tray_target[1],
         "target_z": tray_target[2],
         "placement_error": placement_error,
+        "contact_count": data.ncon,
+        "workpiece_tray_contacts": contact_count_between_bodies(model, data, "workpiece", "hole_tray"),
+        "base_table_contacts": contact_count_between_bodies(model, data, "base_link", "work_table"),
     }
     return row
 
@@ -273,10 +289,11 @@ def run(headless=False, realtime=1.0, log_file=None, log_every=10):
     total_time = sum(stage.duration for stage in STAGES[1:])
     rows = []
     step_count = 0
+    previous_stage = None
     log_every = max(1, log_every)
 
     def step_once(t):
-        nonlocal step_count
+        nonlocal previous_stage, step_count
         stage_name, base_y, left, right, left_gripper, right_gripper, workpiece, attached, tray_attached = sample_stage(t)
         wheel_angle = -(base_y - STAGES[0].base_y) / WHEEL_RADIUS
         set_base_pose(model, data, joint_qpos, actuator_id, base_y, wheel_angle)
@@ -287,17 +304,23 @@ def run(headless=False, realtime=1.0, log_file=None, log_every=10):
         right_site = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "right_grip_center")
         tray_pos = data.site_xpos[right_site] + RIGHT_GRIP_TRAY_OFFSET if tray_attached else TRAY_POS
         tray_target = tray_pos + TRAY_TARGET_LOCAL
+        tray_release = tray_pos + TRAY_RELEASE_LOCAL
 
+        workpiece_pose = workpiece
         if attached:
-            workpiece = data.site_xpos[left_site] + LEFT_GRIP_WORKPIECE_OFFSET
-        elif stage_name in ("lower_into_tray", "release_workpiece", "left_retreat"):
-            workpiece = tray_target
+            workpiece_pose = data.site_xpos[left_site] + LEFT_GRIP_WORKPIECE_OFFSET
+        elif stage_name in ("lower_into_tray", "release_workpiece", "left_clear", "left_retreat"):
+            workpiece_pose = None
+            if previous_stage not in ("release_workpiece", "left_clear", "left_retreat"):
+                workpiece_pose = tray_release
 
         set_tray_pose(model, data, joint_qpos, tray_pos)
-        set_workpiece_pose(model, data, joint_qpos, workpiece)
+        if workpiece_pose is not None:
+            set_workpiece_pose(model, data, joint_qpos, workpiece_pose)
         mujoco.mj_forward(model, data)
         mujoco.mj_step(model, data)
         step_count += 1
+        previous_stage = stage_name
 
         should_log = (headless or log_file is not None) and (step_count % log_every == 0 or t >= total_time)
         if should_log:

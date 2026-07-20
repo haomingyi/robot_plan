@@ -2,14 +2,18 @@
 
 This project is a MuJoCo simulation benchmark for wheeled dual-arm mobile manipulation. It is designed to be practical, debuggable, and suitable for portfolio or resume presentation.
 
+## Project Status
+
+The current version is a stable learning baseline. The main MuJoCo task, repeated evaluation, contact diagnostics, Cartesian IK debugger, Gazebo smoke test, and Isaac Sim smoke test have been validated on the target workstation. Future work can build on this baseline without changing its documented run commands.
+
 ## Final Effect
 
 The current demo shows a complete wheeled dual-arm coordination sequence in the official MuJoCo Viewer:
 
 - The mobile base drives toward the table.
 - The left arm grasps the workpiece.
-- The right arm grasps the tray.
-- Both arms lift together and place the workpiece into the target position on the tray.
+- The right arm approaches from the tray's right side and grips a dedicated side tab.
+- The workpiece lifts first, the tray lifts second, and the left arm inserts the workpiece into a tray pocket.
 
 The goal is not only to play an animation, but to grow this into a debuggable, measurable, and extensible mobile manipulation benchmark.
 
@@ -19,6 +23,9 @@ The goal is not only to play an animation, but to grow this into a debuggable, m
 - `scripts/dual_arm_pick_place.py`: the main demo script with staged control for the base, dual arms, grippers, tray, and workpiece.
 - `scripts/evaluate_dual_arm.py`: repeated headless evaluation for the wheeled dual-arm task.
 - `scripts/plot_dual_arm_run.py`: diagnostic plotting for dual-arm CSV logs.
+- `scripts/debug_cartesian_ik.py`: interactive Cartesian IK debugger with target and measured-position markers.
+- `scripts/ik_utils.py`: damped least-squares position IK utilities.
+- `scripts/plot_cartesian_ik.py`: IK convergence and joint-solution plotting.
 - `run_dual_arm.sh`: one-command launcher for the MuJoCo Viewer.
 - `manipulation_benchmark.py`: legacy single-arm robosuite baseline kept for comparison and learning.
 - `scripts/evaluate_policy.py`: repeated evaluation script for the legacy baseline.
@@ -76,6 +83,40 @@ Change playback speed:
 ```
 
 The viewer loops the full sequence and does not close automatically. Pause the Viewer when you want to inspect the scene, and close the Viewer window when you are done.
+
+## Contact And Physics Checks
+
+The table, tray structure, workpiece, gripper fingers, wheels, and mobile-base shell have collision geometry. The tray has four physical pockets, a supporting bottom, and a dedicated grip tab on its right side. The workpiece is released into the target pocket under gravity; the left gripper clears upward before retreating.
+
+Enable `Contact Point` and `Contact Force` in the Viewer to inspect contacts. The main CSV log includes `contact_count`, `workpiece_tray_contacts`, and `base_table_contacts` for headless verification.
+
+Green sites named `left_grip_center` and `right_grip_center` are end-effector reference points used for IK and logging. Red sites mark finger tips and the workpiece reference point. Sites are debug markers, not collision geometry.
+
+The current benchmark still uses scripted attachment while carrying the workpiece and tray. Finger motion and release contacts are simulated, but carrying is not yet a friction-only grasp.
+
+## Debug Cartesian IK
+
+Open the interactive left-arm IK debugger:
+
+```bash
+python scripts/debug_cartesian_ik.py
+```
+
+The red sphere is the Cartesian target, the green sphere is the measured gripper position, and the yellow line is the current position error. Use `A/D` for world X, `S/W` for world Y, and `Q/E` for world Z. Press `N` to execute exactly one IK iteration, `G` to solve automatically, and `R` to reset the experiment.
+
+Run the same 5 cm Z-axis target without a window:
+
+```bash
+python scripts/debug_cartesian_ik.py --headless --axis z --distance 0.05
+```
+
+Each IK iteration is written to `logs/cartesian_ik_debug.csv`, including target position, measured position, error, joint update, Jacobian minimum singular value, and all seven left-arm joint positions.
+
+Plot the convergence after closing the Viewer or running headless:
+
+```bash
+python scripts/plot_cartesian_ik.py logs/cartesian_ik_debug.csv --output outputs/cartesian_ik_debug.png
+```
 
 ## Learning Path
 
