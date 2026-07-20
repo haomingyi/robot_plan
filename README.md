@@ -2,6 +2,10 @@
 
 This project is a MuJoCo simulation benchmark for wheeled dual-arm mobile manipulation. It is designed to be practical, debuggable, and suitable for portfolio or resume presentation.
 
+## Project Status
+
+The current version is a stable learning baseline. The main MuJoCo task, repeated evaluation, contact diagnostics, Cartesian IK debugger, Gazebo smoke test, and Isaac Sim smoke test have been validated on the target workstation. Future work can build on this baseline without changing its documented run commands.
+
 ## Final Effect
 
 The current demo shows a complete wheeled dual-arm coordination sequence in the official MuJoCo Viewer:

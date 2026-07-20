@@ -9,7 +9,7 @@ This project uses MuJoCo as the main benchmark. Gazebo and Isaac Sim are used as
 - GPU: NVIDIA GeForce RTX 5070
 - NVIDIA driver: 580.159.03
 - Isaac Sim: installed at `/home/hzm/isaacsim`
-- Gazebo Sim: not fully installed yet; only the ROS-provided `gz` tool is currently available
+- Gazebo Sim: installed through the ROS 2 Jazzy vendor packages; the minimal server and GUI launcher are available
 
 ## Step 1: MuJoCo Baseline
 
